@@ -1,0 +1,16 @@
+[project]
+name = "my-mini-cc"
+version = "0.1.0"
+description = "Modular AI coding agent built on LangChain"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain>=0.3",
+    "langchain-openai>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-community>=0.3",
+    "pydantic-settings>=2.0",
+    "pyjwt>=2.0",
+]
+
+[project.scripts]
+mini-cc = "main:main"

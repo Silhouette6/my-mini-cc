@@ -1,0 +1,6 @@
+langchain>=0.3
+langchain-openai>=0.3
+langchain-anthropic>=0.3
+langchain-community>=0.3
+pydantic-settings>=2.0
+pyjwt>=2.0
