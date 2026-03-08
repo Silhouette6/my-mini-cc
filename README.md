@@ -137,6 +137,10 @@ output = MiniCC.quick_run("列出所有 TODO", workdir="/project")
 | `WORKER_CODER_MAX_ITER` | `30` | coder Worker 最大迭代 |
 | `WORKER_SHELL_MAX_ITER` | `10` | shell Worker 最大迭代 |
 | `PROGRESS_SINGLE_LINE` | `true` | REPL 进度：true 单行覆盖，false 每状态换行输出 |
+| `PROGRESS_STATUS_BASH_MAX` | `48` | bash 命令在状态栏显示的最大字符数 |
+| `PROGRESS_STATUS_READ_FILE_MAX` | `40` | read_file 路径在状态栏显示的最大字符数 |
+| `PROGRESS_STATUS_EDIT_PATH_MAX` | `35` | edit_file/write_file 路径在状态栏显示的最大字符数 |
+| `PROGRESS_STATUS_GENERIC_MAX` | `40` | 其他工具参数在状态栏显示的最大字符数 |
 | `COMMAND_TIMEOUT` | `120` | shell 命令超时（秒） |
 
 ## 技能插件开发

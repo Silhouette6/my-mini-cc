@@ -26,22 +26,28 @@ from memory.summary import AgentMemory
 
 
 def _format_tool_args(tool_name: str, args: dict | None) -> str:
-    """Format tool name + key args for status display (max ~50 chars)."""
+    """Format tool name + key args for status display."""
+    import config
+    s = config.settings
     if not args or not isinstance(args, dict):
         return tool_name
     if tool_name == "bash" and "command" in args:
         cmd = str(args["command"]).strip()
-        return f"{tool_name}: {cmd[:48]}{'...' if len(cmd) > 48 else ''}"
+        m = s.progress_status_bash_max
+        return f"{tool_name}: {cmd[:m]}{'...' if len(cmd) > m else ''}"
     if tool_name == "read_file":
         path = args.get("path", args.get("file", ""))
-        return f"{tool_name}: {str(path)[:40]}{'...' if len(str(path)) > 40 else ''}"
+        m = s.progress_status_read_file_max
+        return f"{tool_name}: {str(path)[:m]}{'...' if len(str(path)) > m else ''}"
     if tool_name in ("edit_file", "write_file"):
         path = args.get("path", "")
-        return f"{tool_name}: {str(path)[:35]}{'...' if len(str(path)) > 35 else ''}"
+        m = s.progress_status_edit_path_max
+        return f"{tool_name}: {str(path)[:m]}{'...' if len(str(path)) > m else ''}"
     # Generic: show first arg value
+    m = s.progress_status_generic_max
     for k, v in args.items():
-        s = str(v)[:40]
-        return f"{tool_name}: {s}{'...' if len(str(v)) > 40 else ''}"
+        val = str(v)
+        return f"{tool_name}: {val[:m]}{'...' if len(val) > m else ''}"
     return tool_name
 
 

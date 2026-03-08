@@ -1,0 +1,5 @@
+{
+  "name": "project-code-understanding",
+  "description": "系统化理解陌生项目代码库：分析目录结构、入口点、核心模块与依赖关系。适用于用户说「递归探索」「这个项目是做什么的」「理解代码结构」「分析架构」等场景。遇到此类请求时，先调用 load_skill('project-code-understanding') 获取完整工作流，再按工作流执行。",
+  "tools": []
+}

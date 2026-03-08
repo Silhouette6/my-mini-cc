@@ -44,6 +44,10 @@ class Settings(BaseSettings):
 
     # --- REPL 进度展示 ---
     progress_single_line: bool = True   # True: 单行覆盖刷新（不刷屏）；False: 每状态换行持续输出
+    progress_status_bash_max: int = 48      # bash 命令在状态栏显示的最大字符数
+    progress_status_read_file_max: int = 40  # read_file 路径在状态栏显示的最大字符数
+    progress_status_edit_path_max: int = 35  # edit_file/write_file 路径在状态栏显示的最大字符数
+    progress_status_generic_max: int = 40   # 其他工具参数在状态栏显示的最大字符数
 
     # --- 安全策略 ---
     dangerous_commands: list[str] = [   # bash 工具拦截的危险命令关键词
