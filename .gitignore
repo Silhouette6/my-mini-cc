@@ -19,7 +19,6 @@ ENV/
 .transcripts/
 
 # Distribution / packaging
-build/
 dist/
 *.egg-info/
 *.egg
