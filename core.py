@@ -14,9 +14,12 @@ Usage::
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator
+
+from tenacity import Retrying
 
 import config
 from config import Settings, settings as _default_settings
@@ -31,6 +34,19 @@ from utils.debug_log import (
     append_turn_header,
     get_or_create_log_path,
 )
+from utils.retry import make_retry_kwargs
+
+
+def _strip_thinking(text: str) -> str:
+    """剥离推理模型输出的 <think>...</think> 思考块。
+
+    兼容两种情况：
+    - 完整的思考块：<think>...</think>
+    - 未闭合的思考块（响应被截断时）：<think>...（无结束标签）
+    """
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<think>.*$', '', text, flags=re.DOTALL)
+    return text.strip()
 
 
 def _format_tool_args(tool_name: str, args: dict | None) -> str:
@@ -166,16 +182,28 @@ class MiniCC:
         if self._settings.debug_log_enabled:
             return self.chat_with_progress(message, on_status=None)
         self._memory.compress()
-        messages = self._memory.get_context_messages() + [
+        input_messages = self._memory.get_context_messages() + [
             HumanMessage(content=message),
         ]
-        result = self._agent.invoke({"messages": messages})
-        result_messages = result.get("messages", [])
+        result_messages: list = []
+        try:
+            for attempt in Retrying(**make_retry_kwargs()):
+                with attempt:
+                    result = self._agent.invoke({"messages": input_messages})
+                    result_messages = result.get("messages", [])
+        except Exception as e:
+            return AgentResult(
+                output=f"[错误] API 调用失败（已超出重试次数）：{e}",
+                token_usage=self._memory.build_context_status(
+                    messages=self._memory.get_context_messages()
+                ),
+            )
 
         output = ""
         if result_messages:
             last = result_messages[-1]
             output = last.content if hasattr(last, "content") else str(last)
+            output = _strip_thinking(output)
 
         self._memory.save_messages(result_messages)
 
@@ -209,67 +237,86 @@ class MiniCC:
                 self._log_path,
             )
             append_turn_header(self._log_path, self._turn_count, message)
-            model_iter = 0
 
-        for chunk in self._agent.stream({"messages": messages}):
-            for node_name, node_output in chunk.items():
-                if node_name == "__metadata__":
-                    continue
-                if not isinstance(node_output, dict):
-                    continue
-                msgs = node_output.get("messages", [])
+        # messages 在每次 Retrying attempt 开始时重置为 input_messages，
+        # 防止因中途失败导致消息列表处于不一致的中间状态。
+        messages = list(input_messages)
+        model_iter = 0
 
-                if self._settings.debug_log_enabled and msgs:
-                    if node_name == "model":
-                        model_iter += 1
-                        append_model_call_log(
-                            self._log_path,
-                            model_iter,
-                            self._get_system_prompt(messages=messages),
-                            messages,
-                            msgs,
-                        )
-                    elif node_name == "tools":
-                        append_tools_log(self._log_path, model_iter, msgs)
+        try:
+            for attempt in Retrying(**make_retry_kwargs()):
+                with attempt:
+                    # 重置本次 attempt 的消息列表和 debug 计数器
+                    messages = list(input_messages)
+                    model_iter = 0
 
-                if msgs:
-                    messages = messages + msgs
+                    for chunk in self._agent.stream({"messages": messages}):
+                        for node_name, node_output in chunk.items():
+                            if node_name == "__metadata__":
+                                continue
+                            if not isinstance(node_output, dict):
+                                continue
+                            msgs = node_output.get("messages", [])
 
-                if on_status is None:
-                    continue
+                            if self._settings.debug_log_enabled and msgs:
+                                if node_name == "model":
+                                    model_iter += 1
+                                    append_model_call_log(
+                                        self._log_path,
+                                        model_iter,
+                                        self._get_system_prompt(messages=messages),
+                                        messages,
+                                        msgs,
+                                    )
+                                elif node_name == "tools":
+                                    append_tools_log(self._log_path, model_iter, msgs)
 
-                if node_name == "model":
-                    for msg in msgs:
-                        if hasattr(msg, "tool_calls") and msg.tool_calls:
-                            parts = []
-                            for tc in msg.tool_calls:
-                                name = tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?")
-                                raw = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", None)
-                                args = raw if isinstance(raw, dict) else {}
-                                detail = _format_tool_args(name, args)
-                                parts.append(detail)
-                            on_status(f"Calling: {' | '.join(parts)}")
-                        else:
-                            on_status("Thinking...")
-                        break
-                elif node_name == "tools":
-                    for msg in msgs:
-                        name = getattr(msg, "name", None) or "tool"
-                        on_status(f"Tool: {name}")
-                        content = getattr(msg, "content", None) or ""
-                        content = str(content).strip()
-                        max_len = config.settings.progress_status_tool_result_max
-                        if content:
-                            preview = content[:max_len] + ("..." if len(content) > max_len else "")
-                            on_status(f"Result: {preview}")
-                        else:
-                            on_status("Result: (empty)")
-                        break
+                            if msgs:
+                                messages = messages + msgs
+
+                            if on_status is None:
+                                continue
+
+                            if node_name == "model":
+                                for msg in msgs:
+                                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                                        parts = []
+                                        for tc in msg.tool_calls:
+                                            name = tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?")
+                                            raw = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", None)
+                                            args = raw if isinstance(raw, dict) else {}
+                                            detail = _format_tool_args(name, args)
+                                            parts.append(detail)
+                                        on_status(f"Calling: {' | '.join(parts)}")
+                                    else:
+                                        on_status("Thinking...")
+                                    break
+                            elif node_name == "tools":
+                                for msg in msgs:
+                                    name = getattr(msg, "name", None) or "tool"
+                                    on_status(f"Tool: {name}")
+                                    content = getattr(msg, "content", None) or ""
+                                    content = str(content).strip()
+                                    max_len = config.settings.progress_status_tool_result_max
+                                    if content:
+                                        preview = content[:max_len] + ("..." if len(content) > max_len else "")
+                                        on_status(f"Result: {preview}")
+                                    else:
+                                        on_status("Result: (empty)")
+                                    break
+        except Exception as e:
+            return AgentResult(
+                output=f"[错误] API 调用失败（已超出重试次数）：{e}",
+                token_usage=self._memory.build_context_status(
+                    messages=self._memory.get_context_messages()
+                ),
+            )
 
         output = ""
         if messages:
             last = messages[-1]
             output = last.content if hasattr(last, "content") else str(last)
+            output = _strip_thinking(output)
 
         self._memory.save_messages(messages)
 
@@ -281,12 +328,19 @@ class MiniCC:
         )
 
     def stream(self, message: str) -> Iterator[str]:
-        """Streaming interaction — yields text chunks."""
+        """Streaming interaction — yields text chunks.
+
+        注意：generator 内部无法使用 Retrying 上下文管理器（yield 不能在
+        with 块内跨越 attempt 边界），因此此方法仅做最外层 try/except 兜底。
+        429 / Timeout 的重试保护由 LLM 层（memory/summary.py）覆盖；
+        如需在 stream 级别重试，建议改用 chat_with_progress()。
+        """
         self._memory.compress()
         messages = self._memory.get_context_messages() + [
             HumanMessage(content=message),
         ]
         full_output = ""
+        model_iter = 0
 
         if self._settings.debug_log_enabled:
             self._turn_count += 1
@@ -296,36 +350,38 @@ class MiniCC:
                 self._log_path,
             )
             append_turn_header(self._log_path, self._turn_count, message)
-            model_iter = 0
 
-        for chunk in self._agent.stream({"messages": messages}):
-            for node_name, node_output in chunk.items():
-                if node_name == "__metadata__":
-                    continue
-                if not isinstance(node_output, dict):
-                    continue
-                msgs = node_output.get("messages", [])
+        try:
+            for chunk in self._agent.stream({"messages": messages}):
+                for node_name, node_output in chunk.items():
+                    if node_name == "__metadata__":
+                        continue
+                    if not isinstance(node_output, dict):
+                        continue
+                    msgs = node_output.get("messages", [])
 
-                if self._settings.debug_log_enabled and msgs:
-                    if node_name == "model":
-                        model_iter += 1
-                        append_model_call_log(
-                            self._log_path,
-                            model_iter,
-                            self._get_system_prompt(messages=messages),
-                            messages,
-                            msgs,
-                        )
-                    elif node_name == "tools":
-                        append_tools_log(self._log_path, model_iter, msgs)
+                    if self._settings.debug_log_enabled and msgs:
+                        if node_name == "model":
+                            model_iter += 1
+                            append_model_call_log(
+                                self._log_path,
+                                model_iter,
+                                self._get_system_prompt(messages=messages),
+                                messages,
+                                msgs,
+                            )
+                        elif node_name == "tools":
+                            append_tools_log(self._log_path, model_iter, msgs)
 
-                if msgs:
-                    messages = messages + msgs
-                for msg in msgs:
-                    content = msg.content if hasattr(msg, "content") else ""
-                    if content and not hasattr(msg, "tool_calls"):
-                        yield content
-                        full_output += content
+                    if msgs:
+                        messages = messages + msgs
+                    for msg in msgs:
+                        content = msg.content if hasattr(msg, "content") else ""
+                        if content and not hasattr(msg, "tool_calls"):
+                            yield content
+                            full_output += content
+        except Exception as e:
+            yield f"[错误] API 调用失败：{e}"
 
         self._memory.save_messages(messages)
 

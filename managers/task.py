@@ -4,7 +4,6 @@ TaskManager (persistence, dependency graph, auto-unblock)."""
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 
 import config
@@ -70,11 +69,24 @@ class TaskManager:
     # Public API
     # ------------------------------------------------------------------
 
+    def _next_int_id(self, existing: dict) -> str:
+        """Return the next available sequential integer ID as a string."""
+        used: set[int] = set()
+        for tid in existing:
+            try:
+                used.add(int(tid))
+            except ValueError:
+                pass
+        n = 1
+        while n in used:
+            n += 1
+        return str(n)
+
     def update(self, items: list[dict]) -> str:
         """Batch create / update tasks.
 
         Each item:
-          - id: str         (optional — auto-generated if absent)
+          - id: str         (optional — auto-generated as next integer if absent)
           - content: str    (required)
           - status: str     (required — pending | in_progress | completed)
           - blocked_by: list[str]  (optional — ids of blocking tasks)
@@ -95,7 +107,7 @@ class TaskManager:
         )
 
         for item in items:
-            tid = str(item.get("id", "")).strip() or str(uuid.uuid4())[:8]
+            tid = str(item.get("id", "")).strip() or self._next_int_id(existing)
             is_existing = tid in existing
             prev = existing.get(tid, {})
 

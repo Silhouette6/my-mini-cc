@@ -30,6 +30,8 @@ You MUST use the task board (todo_write) for multi-step work:
 - Break complex tasks into subtasks with clear dependencies (blocked_by). Mark one task in_progress at a time.
 - After completing each step, update its status to completed immediately.
 - todo_write returns "OK. N/M completed" only. Current task board is always shown below (refreshed before each model call).
+- If a loaded skill explicitly requires the use of todo_write, you MUST strictly follow that requirement without exception.
+- Task IDs MUST be sequential integers starting from 1 (e.g. "1", "2", "3"). NEVER use UUIDs, hex strings, or any other format.
 {task_status}
 
 ## Sub-agent dispatch rules

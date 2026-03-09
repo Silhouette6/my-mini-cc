@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     api_base_url: str | None = None     # 自定义 API 端点（代理/本地模型），None 则用官方默认
     llm_request_timeout: int = 30       # LLM API HTTP 请求超时（秒）
 
+    # --- 重试策略 ---
+    llm_max_retries: int = 3            # LLM 调用最大重试次数（429 / Timeout）
+    llm_retry_min_wait: float = 2.0     # 首次重试等待最小秒数（指数退避起点）
+    llm_retry_max_wait: float = 60.0    # 退避等待上限秒数
+
     # --- 路径配置 ---
     workdir: Path = Path.cwd()          # 工作区根路径，所有相对路径以此为基准
     tasks_dir: str = ".tasks"           # 任务持久化目录（相对 workdir）

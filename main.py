@@ -57,7 +57,14 @@ def main() -> None:
             else:
                 print(f"{color}{s}\033[0m")
 
-        result = agent.chat_with_progress(query, on_status=on_status)
+        try:
+            result = agent.chat_with_progress(query, on_status=on_status)
+        except Exception as e:
+            print()
+            print(f"\033[31m[错误] 调用失败：{e}\033[0m")
+            print()
+            continue
+
         print()
         print(result.output)
         print(f"\n\033[90m{result.token_usage}\033[0m")

@@ -12,6 +12,12 @@ def create_llm() -> BaseChatModel:
       - OPENAI_API_KEY for openai
       - ANTHROPIC_API_KEY for anthropic
       - ZHIPUAI_API_KEY for zhipu
+
+    注意：不在工厂层添加 .with_retry()，因为那会返回 RunnableRetry
+    对象，而 create_agent() 内部需要调用 llm.bind_tools()，该方法只
+    存在于 BaseChatModel，不存在于 RunnableRetry。重试逻辑在
+    core.py（agent 调用）和 memory/summary.py（LLM 直接调用）两处
+    分别通过 tenacity 实现。
     """
     settings = config.settings
     provider = settings.llm_provider.lower()

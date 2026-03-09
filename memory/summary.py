@@ -29,6 +29,7 @@ from langchain_core.messages import (
 )
 
 import config
+from utils.retry import with_llm_retry
 
 
 class AgentMemory:
@@ -255,7 +256,7 @@ class AgentMemory:
             f"New turn:\n{new_content}\n\n"
             "Updated summary:"
         )
-        response = self.llm.invoke(prompt)
+        response = with_llm_retry(self.llm.invoke, prompt)
         self.moving_summary = (
             response.content if hasattr(response, "content") else str(response)
         )
@@ -273,9 +274,10 @@ class AgentMemory:
         )
         full_context = full_context[:80000]
 
-        response = self.llm.invoke(
+        response = with_llm_retry(
+            self.llm.invoke,
             f"Summarize this entire conversation for continuity. "
-            f"Be concise but preserve key decisions and context:\n{full_context}"
+            f"Be concise but preserve key decisions and context:\n{full_context}",
         )
         self.moving_summary = (
             response.content if hasattr(response, "content") else str(response)
