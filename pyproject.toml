@@ -1,17 +1,15 @@
 [project]
-name = "my-mini-cc"
+name = "adk-mini-cc"
 version = "0.1.0"
-description = "Modular AI coding agent built on LangChain"
+description = "Modular AI coding agent built on Google ADK"
 requires-python = ">=3.10"
 dependencies = [
-    "langchain>=0.3",
-    "langchain-openai>=0.3",
-    "langchain-anthropic>=0.3",
-    "langchain-community>=0.3",
+    "google-adk>=1.0",
+    "litellm>=1.0",
     "pydantic-settings>=2.0",
-    "pyjwt>=2.0",
+    "python-dotenv>=1.0",
     "code-index-mcp>=2.13.0",
 ]
 
 [project.scripts]
-mini-cc = "main:main"
+adk-mini-cc = "main:main"

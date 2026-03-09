@@ -7,7 +7,6 @@ import warnings
 import config
 from core import MiniCC
 
-# 智谱 API Key 格式触发 PyJWT 的 HMAC 长度警告，可安全忽略
 warnings.filterwarnings("ignore", message=".*HMAC key.*", module="jwt.*")
 
 
@@ -67,7 +66,8 @@ def main() -> None:
 
         print()
         print(result.output)
-        print(f"\n\033[90m{result.token_usage}\033[0m")
+        if result.token_usage:
+            print(f"\n\033[90m{result.token_usage}\033[0m")
         print()
 
 

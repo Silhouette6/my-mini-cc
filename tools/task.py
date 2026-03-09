@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from langchain_core.tools import StructuredTool
+from google.adk.tools.function_tool import FunctionTool
 
 from managers.task import TaskManager
 
@@ -24,7 +24,7 @@ def set_task_manager(mgr: TaskManager) -> None:
     _task_mgr = mgr
 
 
-def _todo_write(items: str) -> str:
+def todo_write(items: str) -> str:
     """Batch create or update tasks.
 
     *items* is a JSON string — an array of objects, each with:
@@ -34,6 +34,7 @@ def _todo_write(items: str) -> str:
       - blocked_by: list[str] (optional, ids of blocking tasks)
 
     Constraints: max 20 tasks, at most 1 in_progress.
+    Returns 'OK. N/M completed' only; current task board is shown in system prompt.
     """
     try:
         parsed = json.loads(items)
@@ -46,17 +47,4 @@ def _todo_write(items: str) -> str:
         return f"Error: {e}"
 
 
-todo_write = StructuredTool.from_function(
-    func=_todo_write,
-    name="todo_write",
-    description=(
-        "Batch create or update tasks. Pass a JSON array string of items, "
-        "each with: id (optional), content (required), status (required: "
-        "pending|in_progress|completed), blocked_by (optional: list of task ids). "
-        "Max 20 tasks, at most 1 in_progress. Returns 'OK. N/M completed' only; "
-        "current task board is shown in system prompt."
-    ),
-)
-
-
-TASK_TOOLS = [todo_write]
+TASK_TOOLS = [FunctionTool(todo_write)]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from langchain_core.tools import tool
+from google.adk.tools.function_tool import FunctionTool
 
 from managers.skill import SkillLoader
 
@@ -24,7 +24,6 @@ def set_skill_loader(loader: SkillLoader) -> None:
     _skill_loader = loader
 
 
-@tool
 def load_skill(name: str) -> str:
     """Load a skill by name to reveal its full instructions and available tools.
 
@@ -35,7 +34,6 @@ def load_skill(name: str) -> str:
     return _get_loader().load(name)
 
 
-@tool
 def run_skill_tool(skill_name: str, tool_name: str, args: str = "{}") -> str:
     """Execute a tool provided by a loaded skill.
 
@@ -49,4 +47,7 @@ def run_skill_tool(skill_name: str, tool_name: str, args: str = "{}") -> str:
     return _get_loader().run_tool(skill_name, tool_name, parsed_args)
 
 
-SKILL_TOOLS = [load_skill, run_skill_tool]
+SKILL_TOOLS = [
+    FunctionTool(load_skill),
+    FunctionTool(run_skill_tool),
+]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from langchain_core.tools import tool
+from google.adk.tools.function_tool import FunctionTool
 
 import config
 
@@ -18,7 +18,6 @@ def safe_path(p: str) -> Path:
     return path
 
 
-@tool
 def bash(command: str) -> str:
     """Run a shell command in the workspace directory."""
     s = config.settings
@@ -42,7 +41,6 @@ def bash(command: str) -> str:
         return f"Error: Timeout ({s.command_timeout}s)"
 
 
-@tool
 def read_file(
     path: str,
     start_line: int | None = None,
@@ -56,18 +54,12 @@ def read_file(
         start_line: Start line (1-indexed, inclusive). Use with end_line for range.
         end_line: End line (1-indexed, inclusive). Use with start_line for range.
         limit: When no range given, limit to first N lines.
-
-    Examples:
-        read_file("src/main.py")                    # full file
-        read_file("src/main.py", limit=50)         # first 50 lines
-        read_file("src/main.py", start_line=10, end_line=30)  # lines 10-30
     """
     try:
         lines = safe_path(path).read_text(encoding="utf-8").splitlines()
         total = len(lines)
 
         if start_line is not None and end_line is not None:
-            # Range: 1-indexed inclusive
             start = max(1, start_line) - 1
             end = min(total, end_line)
             if start >= end:
@@ -81,7 +73,6 @@ def read_file(
         return f"Error: {e}"
 
 
-@tool
 def write_file(path: str, content: str) -> str:
     """Write content to a file (creates parent directories as needed)."""
     try:
@@ -93,7 +84,6 @@ def write_file(path: str, content: str) -> str:
         return f"Error: {e}"
 
 
-@tool
 def edit_file(path: str, old_text: str, new_text: str) -> str:
     """Replace the first occurrence of *old_text* with *new_text* in a file."""
     try:
@@ -107,5 +97,10 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
         return f"Error: {e}"
 
 
-BASE_TOOLS = [bash, read_file, write_file, edit_file]
-READ_ONLY_TOOLS = [bash, read_file]
+BASE_TOOLS = [
+    FunctionTool(bash),
+    FunctionTool(read_file),
+    FunctionTool(write_file),
+    FunctionTool(edit_file),
+]
+READ_ONLY_TOOLS = [FunctionTool(bash), FunctionTool(read_file)]

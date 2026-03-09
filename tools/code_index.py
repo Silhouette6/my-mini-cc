@@ -1,8 +1,4 @@
-"""Code index tools: get_symbol_body with on-demand deep index build.
-
-Uses code-index-mcp (PyPI) for symbol extraction. Builds index automatically
-on first use; subsequent calls use cached index.
-"""
+"""Code index tools: get_symbol_body with on-demand deep index build."""
 
 from __future__ import annotations
 
@@ -11,14 +7,16 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from langchain_core.tools import tool
+from google.adk.tools.function_tool import FunctionTool
 
 import config
 from tools.base import safe_path
 
+_project_locks: dict[str, threading.RLock] = {}
+_locks_guard = threading.Lock()
+
 
 def _get_project_lock(project_path: str) -> threading.RLock:
-    """Get per-project RLock for concurrency safety."""
     with _locks_guard:
         if project_path not in _project_locks:
             _project_locks[project_path] = threading.RLock()
@@ -26,7 +24,6 @@ def _get_project_lock(project_path: str) -> threading.RLock:
 
 
 def _make_mock_context(workdir: Path) -> SimpleNamespace:
-    """Build minimal Context for code-index-mcp services."""
     from code_index_mcp.project_settings import ProjectSettings
 
     ctx = SimpleNamespace()
@@ -40,7 +37,6 @@ def _make_mock_context(workdir: Path) -> SimpleNamespace:
 
 
 def _format_result(result: dict) -> str:
-    """Format get_symbol_body result dict as string for tool output."""
     if result.get("status") == "success":
         parts = [f"**{result.get('symbol_name', '?')}** ({result.get('type', '?')})"]
         if result.get("signature"):
@@ -54,11 +50,6 @@ def _format_result(result: dict) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-_project_locks: dict[str, threading.RLock] = {}
-_locks_guard = threading.Lock()
-
-
-@tool
 def get_symbol_body(file_path: str, symbol_name: str) -> str:
     """Get the source code of a function, method, or class from a file.
 
@@ -67,8 +58,8 @@ def get_symbol_body(file_path: str, symbol_name: str) -> str:
     Use when user asks: "where is X defined", "show me the implementation of Y",
     "how does Z work", or when you need to inspect a known symbol.
 
-    Supported: functions, classes, methods. NOT supported: module-level variables
-    (e.g. WORKER_TYPES, BASE_TOOLS). For constants or config, use read_file instead.
+    Supported: functions, classes, methods. NOT supported: module-level variables.
+    For constants or config, use read_file instead.
 
     Args:
         file_path: Path relative to workspace root (e.g. "src/main.py")
@@ -79,7 +70,6 @@ def get_symbol_body(file_path: str, symbol_name: str) -> str:
         returns available_symbols for retry.
     """
     try:
-        # Validate path stays within workspace
         safe_path(file_path)
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)})
@@ -126,4 +116,4 @@ def get_symbol_body(file_path: str, symbol_name: str) -> str:
                 })
 
 
-CODE_INDEX_TOOLS = [get_symbol_body]
+CODE_INDEX_TOOLS = [FunctionTool(get_symbol_body)]

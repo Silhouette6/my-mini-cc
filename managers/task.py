@@ -19,10 +19,6 @@ class TaskManager:
         self._dir = tasks_dir or config.settings.tasks_path
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _path(self, tid: str) -> Path:
         return self._dir / f"{tid}.json"
 
@@ -65,10 +61,6 @@ class TaskManager:
                 t["blocked_by"].remove(completed_id)
                 self._save(t)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def _next_int_id(self, existing: dict) -> str:
         """Return the next available sequential integer ID as a string."""
         used: set[int] = set()
@@ -83,21 +75,7 @@ class TaskManager:
         return str(n)
 
     def update(self, items: list[dict]) -> str:
-        """Batch create / update tasks.
-
-        Each item:
-          - id: str         (optional — auto-generated as next integer if absent)
-          - content: str    (required)
-          - status: str     (required — pending | in_progress | completed)
-          - blocked_by: list[str]  (optional — ids of blocking tasks)
-
-        Constraints:
-          - At most MAX_ITEMS tasks total.
-          - At most 1 task in_progress at a time.
-          - Completing a task auto-unblocks downstream dependents.
-
-        Returns the rendered task list.
-        """
+        """Batch create / update tasks."""
         if not items:
             raise ValueError("items list must not be empty")
 
@@ -137,7 +115,6 @@ class TaskManager:
         if len(existing) > MAX_ITEMS:
             raise ValueError(f"Max {MAX_ITEMS} tasks allowed")
         if in_progress_count > 1:
-            # Auto-resolve: keep only the last in_progress (by batch order)
             in_progress_ids = [
                 tid for tid, t in existing.items() if t.get("status") == "in_progress"
             ]

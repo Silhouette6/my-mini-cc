@@ -12,8 +12,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-# 将 .env 中所有键值加载到 os.environ，
-# 使 LangChain 各集成包能自动读取 API Key（OPENAI_API_KEY 等）
 load_dotenv(override=False)
 
 
@@ -37,11 +35,11 @@ class Settings(BaseSettings):
     transcript_dir: str = ".transcripts"  # 对话存档目录（相对 workdir）
 
     # --- 记忆压缩阈值 ---
-    soft_token_limit: int = 40000       # Layer 2 渐进式摘要触发阈值（token 数）
-    hard_token_limit: int = 80000       # Layer 3 全量压缩触发阈值（token 数）
-    memory_tool_retain: int = 4         # Layer 1 保留的普通工具消息条数
-    memory_subagent_retain: int = 8    # Layer 1 保留的 subagent 返回条数（相对重要）
-    memory_load_skill_retain: int = 10  # Layer 1 保留的 load_skill 返回条数
+    soft_token_limit: int = 40000       # 渐进式摘要触发阈值（token 数）
+    hard_token_limit: int = 80000       # 全量压缩触发阈值（token 数）
+    memory_tool_retain: int = 4         # 保留的普通工具消息条数
+    memory_subagent_retain: int = 8     # 保留的 subagent 返回条数
+    memory_load_skill_retain: int = 10   # 保留的 load_skill 返回条数
 
     # --- 主 Agent ---
     max_iterations: int = 30            # 主 Agent 单轮最大工具调用迭代次数
@@ -52,7 +50,7 @@ class Settings(BaseSettings):
     worker_shell_max_iter: int = 10     # shell 类型（命令执行）
 
     # --- REPL 进度展示 ---
-    progress_single_line: bool = True   # True: 单行覆盖刷新（不刷屏）；False: 每状态换行持续输出
+    progress_single_line: bool = False   # True: 单行覆盖刷新（不刷屏）；False: 每状态换行持续输出
     progress_status_bash_max: int = 48      # bash 命令在状态栏显示的最大字符数
     progress_status_read_file_max: int = 40  # read_file 路径在状态栏显示的最大字符数
     progress_status_edit_path_max: int = 35  # edit_file/write_file 路径在状态栏显示的最大字符数
@@ -70,25 +68,19 @@ class Settings(BaseSettings):
     ]
     command_timeout: int = 120          # bash 命令超时时间（秒）
 
-    # Pydantic Settings：从 .env 读取，忽略未声明的字段
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @property
     def tasks_path(self) -> Path:
-        """任务持久化绝对路径：workdir / tasks_dir"""
         return self.workdir / self.tasks_dir
 
     @property
     def skills_path(self) -> Path:
-        """技能插件绝对路径：workdir / skills_dir"""
         return self.workdir / self.skills_dir
 
     @property
     def transcript_path(self) -> Path:
-        """对话存档绝对路径：workdir / transcript_dir"""
         return self.workdir / self.transcript_dir
 
 
-# 全局单例，各模块通过 from config import settings 引用
-# MiniCC.__init__ 中如有 override 会替换此实例
 settings = Settings()

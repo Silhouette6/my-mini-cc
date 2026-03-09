@@ -12,32 +12,13 @@ import config
 
 
 class SkillLoader:
-    """Manages skills under a skills directory.
-
-    Directory convention::
-
-        skills/
-        ├── database/
-        │   ├── manifest.json   # name, description, tools declarations
-        │   ├── SKILL.md        # full instructions (revealed after load)
-        │   └── tools/
-        │       └── run_migration.py
-        └── docker/
-            ├── manifest.json
-            ├── SKILL.md
-            └── tools/
-                └── compose_up.sh
-    """
+    """Manages skills under a skills directory."""
 
     def __init__(self, skills_dir: Path | None = None):
         self._dir = skills_dir or config.settings.skills_path
         self.registry: dict[str, dict] = {}
         self.loaded: dict[str, dict] = {}
         self._scan()
-
-    # ------------------------------------------------------------------
-    # Scanning & discovery
-    # ------------------------------------------------------------------
 
     def _scan(self) -> None:
         """Read all manifest.json files, storing only name + description."""
@@ -64,15 +45,8 @@ class SkillLoader:
             lines.append(f"  - {name}: {desc}")
         return "\n".join(lines)
 
-    # ------------------------------------------------------------------
-    # Loading (progressive disclosure)
-    # ------------------------------------------------------------------
-
     def load(self, name: str) -> str:
-        """Load a skill: return full SKILL.md + tool descriptions.
-
-        Marks the skill as loaded so run_tool() will accept calls for it.
-        """
+        """Load a skill: return full SKILL.md + tool descriptions."""
         entry = self.registry.get(name)
         if entry is None:
             available = ", ".join(self.registry.keys()) or "none"
@@ -119,10 +93,6 @@ class SkillLoader:
             args_str = "\n".join(args_parts) if args_parts else "    (no arguments)"
             lines.append(f"- **{t['name']}**: {t.get('description', '')}\n{args_str}")
         return "\n".join(lines)
-
-    # ------------------------------------------------------------------
-    # Tool execution
-    # ------------------------------------------------------------------
 
     def run_tool(self, skill_name: str, tool_name: str, args: dict) -> str:
         """Execute a tool script from a loaded skill via subprocess."""
