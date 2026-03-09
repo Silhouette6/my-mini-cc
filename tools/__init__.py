@@ -12,6 +12,13 @@ def get_all_tools(include_subagent: bool = True) -> list:
     (import deferred to avoid circular dependency).
     """
     tools = list(BASE_TOOLS) + list(TASK_TOOLS) + list(SKILL_TOOLS)
+
+    try:
+        from tools.code_index import CODE_INDEX_TOOLS
+        tools.extend(CODE_INDEX_TOOLS)
+    except ImportError:
+        pass
+
     if include_subagent:
         from agent.subagent import subagent
         tools.append(subagent)

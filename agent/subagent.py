@@ -92,7 +92,10 @@ def subagent(prompt: str, worker_type: str = "explore") -> str:
     """
     try:
         worker = _build_worker(worker_type, prompt)
-        result = worker.invoke({"messages": [{"role": "user", "content": prompt}]})
+        result = worker.invoke(
+            {"messages": [{"role": "user", "content": prompt}]},
+            config={"recursion_limit": 40},
+        )
         messages = result.get("messages", [])
         if messages:
             last = messages[-1]

@@ -25,6 +25,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 
 import config
@@ -57,10 +58,10 @@ class AgentMemory:
         # Layer 1: microcompact (every turn, zero LLM cost)
         self._microcompact()
 
-        # Layer 2: progressive summary (trim oldest while over soft limit)
+        # Layer 2: progressive summary (trim oldest turn while over soft limit)
         while (
             self._estimate_tokens() > self.soft_token_limit
-            and len(self.buffer) > 4
+            and self._get_first_turn_end() < len(self.buffer)
         ):
             self._prune_oldest_to_summary()
 
@@ -81,11 +82,33 @@ class AgentMemory:
         return messages
 
     def save_turn(self, user_input: str, ai_output: str) -> None:
-        """Record a completed turn into the buffer."""
+        """Record a completed turn into the buffer (compat)."""
+        msgs: list[BaseMessage] = []
         if user_input:
-            self.buffer.append(HumanMessage(content=user_input))
+            msgs.append(HumanMessage(content=user_input))
         if ai_output:
-            self.buffer.append(AIMessage(content=ai_output))
+            msgs.append(AIMessage(content=ai_output))
+        if msgs:
+            self.buffer.extend(msgs)
+
+    def save_messages(self, messages: list) -> None:
+        """Replace buffer with full conversation (Human, AI, ToolMessage)."""
+        self.buffer = self._normalize_messages(messages)
+
+    def _normalize_messages(self, messages: list) -> list[BaseMessage]:
+        """Convert dict or BaseMessage to BaseMessage list."""
+        out: list[BaseMessage] = []
+        for m in messages:
+            if isinstance(m, BaseMessage):
+                out.append(m)
+            elif isinstance(m, dict):
+                role = m.get("role", "")
+                content = m.get("content", "")
+                if role == "user":
+                    out.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    out.append(AIMessage(content=content))
+        return out
 
     def clear(self) -> None:
         """Reset all memory."""
@@ -97,17 +120,100 @@ class AgentMemory:
     # ------------------------------------------------------------------
 
     def _microcompact(self) -> None:
-        """Clear verbose content from all but the 3 most recent tool messages."""
+        """Clear verbose content from old tool messages.
+
+        Keeps the N most recent tool messages per type:
+        - Regular tools: memory_tool_retain (default 5)
+        - Subagent returns: memory_subagent_retain (default 10) — more important
+        - load_skill returns: memory_load_skill_retain (default 10)
+        """
+        tool_retain = config.settings.memory_tool_retain
+        subagent_retain = config.settings.memory_subagent_retain
+        load_skill_retain = config.settings.memory_load_skill_retain
+
         tool_indices: list[int] = []
+        subagent_indices: list[int] = []
+        load_skill_indices: list[int] = []
         for i, msg in enumerate(self.buffer):
-            if self._is_tool_message(msg):
-                tool_indices.append(i)
-        if len(tool_indices) <= 3:
-            return
-        for idx in tool_indices[:-3]:
+            if not self._is_tool_message(msg):
+                continue
+            tool_indices.append(i)
+            if getattr(msg, "name", None) == "subagent":
+                subagent_indices.append(i)
+            elif getattr(msg, "name", None) == "load_skill":
+                load_skill_indices.append(i)
+
+        special_indices = set(subagent_indices) | set(load_skill_indices)
+        regular_indices = [i for i in tool_indices if i not in special_indices]
+
+        def clear_at(idx: int) -> None:
             msg = self.buffer[idx]
-            if isinstance(msg.content, str) and len(msg.content) > 100:
+            if not isinstance(msg.content, str) or len(msg.content) <= 100:
+                return
+            if isinstance(msg, ToolMessage):
+                self.buffer[idx] = ToolMessage(
+                    content="[cleared]",
+                    tool_call_id=msg.tool_call_id,
+                    name=getattr(msg, "name", None),
+                )
+            else:
                 self.buffer[idx] = type(msg)(content="[cleared]")
+
+        for idx in regular_indices[:-tool_retain]:
+            clear_at(idx)
+        for idx in subagent_indices[:-subagent_retain]:
+            clear_at(idx)
+        for idx in load_skill_indices[:-load_skill_retain]:
+            clear_at(idx)
+
+    def compress_messages(self, messages: list) -> list[BaseMessage]:
+        """Apply Layer 1 style compression to a message list. Returns new list, does not mutate input.
+
+        Used before each model call to avoid context explosion within a turn.
+        Keeps the N most recent tool messages per type; older ones get content cleared to [cleared].
+        """
+        tool_retain = config.settings.memory_tool_retain
+        subagent_retain = config.settings.memory_subagent_retain
+        load_skill_retain = config.settings.memory_load_skill_retain
+
+        tool_indices: list[int] = []
+        subagent_indices: list[int] = []
+        load_skill_indices: list[int] = []
+        for i, msg in enumerate(messages):
+            if not self._is_tool_message(msg):
+                continue
+            tool_indices.append(i)
+            if getattr(msg, "name", None) == "subagent":
+                subagent_indices.append(i)
+            elif getattr(msg, "name", None) == "load_skill":
+                load_skill_indices.append(i)
+
+        special_indices = set(subagent_indices) | set(load_skill_indices)
+        regular_indices = [i for i in tool_indices if i not in special_indices]
+
+        to_clear = set(regular_indices[:-tool_retain] if tool_retain else [])
+        to_clear |= set(subagent_indices[:-subagent_retain] if subagent_retain else [])
+        to_clear |= set(load_skill_indices[:-load_skill_retain] if load_skill_retain else [])
+
+        result: list[BaseMessage] = []
+        for i, msg in enumerate(messages):
+            if i not in to_clear:
+                result.append(msg)
+                continue
+            if not self._is_tool_message(msg) or not isinstance(msg.content, str) or len(msg.content) <= 100:
+                result.append(msg)
+                continue
+            if isinstance(msg, ToolMessage):
+                result.append(
+                    ToolMessage(
+                        content="[cleared]",
+                        tool_call_id=msg.tool_call_id,
+                        name=getattr(msg, "name", None),
+                    )
+                )
+            else:
+                result.append(type(msg)(content="[cleared]"))
+        return result
 
     @staticmethod
     def _is_tool_message(msg: BaseMessage) -> bool:
@@ -120,22 +226,33 @@ class AgentMemory:
     # Layer 2: progressive summary (inspired by SummaryBufferMemory)
     # ------------------------------------------------------------------
 
+    def _get_first_turn_end(self) -> int:
+        """Return exclusive end index of the first full user turn."""
+        human_count = 0
+        for i, msg in enumerate(self.buffer):
+            if getattr(msg, "type", "") == "human":
+                human_count += 1
+                if human_count == 2:
+                    return i
+        return len(self.buffer)
+
     def _prune_oldest_to_summary(self) -> None:
-        """Move the oldest pair of messages into the running summary."""
-        if len(self.buffer) < 2:
+        """Move the oldest full user turn into the running summary."""
+        end = self._get_first_turn_end()
+        if end < 1 or end >= len(self.buffer):
             return
-        oldest_pair = self.buffer[:2]
-        self.buffer = self.buffer[2:]
+        oldest_turn = self.buffer[:end]
+        self.buffer = self.buffer[end:]
 
         new_content = "\n".join(
-            f"[{m.type}] {m.content[:500]}" for m in oldest_pair if m.content
+            f"[{m.type}] {str(m.content or '')[:500]}" for m in oldest_turn if m.content
         )
         prompt = (
-            "Progressively summarize the conversation, integrating the new lines "
+            "Progressively summarize the conversation, integrating the new turn "
             "into the existing summary. Return ONLY the updated summary, keep it "
             "concise.\n\n"
             f"Existing summary:\n{self.moving_summary or '(empty)'}\n\n"
-            f"New lines:\n{new_content}\n\n"
+            f"New turn:\n{new_content}\n\n"
             "Updated summary:"
         )
         response = self.llm.invoke(prompt)

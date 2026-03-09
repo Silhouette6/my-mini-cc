@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     llm_provider: str = "openai"        # LLM 提供者：openai | anthropic | zhipu
     model_id: str = "gpt-4o"            # 模型标识，需与提供者匹配
     api_base_url: str | None = None     # 自定义 API 端点（代理/本地模型），None 则用官方默认
+    llm_request_timeout: int = 30       # LLM API HTTP 请求超时（秒）
 
     # --- 路径配置 ---
     workdir: Path = Path.cwd()          # 工作区根路径，所有相对路径以此为基准
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     # --- 记忆压缩阈值 ---
     soft_token_limit: int = 40000       # Layer 2 渐进式摘要触发阈值（token 数）
     hard_token_limit: int = 80000       # Layer 3 全量压缩触发阈值（token 数）
+    memory_tool_retain: int = 4         # Layer 1 保留的普通工具消息条数
+    memory_subagent_retain: int = 8    # Layer 1 保留的 subagent 返回条数（相对重要）
+    memory_load_skill_retain: int = 10  # Layer 1 保留的 load_skill 返回条数
 
     # --- 主 Agent ---
     max_iterations: int = 30            # 主 Agent 单轮最大工具调用迭代次数
@@ -48,6 +52,12 @@ class Settings(BaseSettings):
     progress_status_read_file_max: int = 40  # read_file 路径在状态栏显示的最大字符数
     progress_status_edit_path_max: int = 35  # edit_file/write_file 路径在状态栏显示的最大字符数
     progress_status_generic_max: int = 40   # 其他工具参数在状态栏显示的最大字符数
+    progress_status_task_max: int = 48      # todo_write 等 task 工具在状态栏显示的最大字符数
+    progress_status_tool_result_max: int = 120   # 工具返回结果在状态栏显示的最大字符数
+
+    # --- 调试 ---
+    debug_log_enabled: bool = False     # 开启时记录每轮上下文/模型/工具到 log/
+    debug_log_dir: str = "log"          # 日志目录（相对 workdir）
 
     # --- 安全策略 ---
     dangerous_commands: list[str] = [   # bash 工具拦截的危险命令关键词

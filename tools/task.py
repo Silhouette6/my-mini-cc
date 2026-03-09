@@ -1,10 +1,10 @@
-"""Task tools — todo_write and todo_list wrapping the unified TaskManager."""
+"""Task tools — todo_write wrapping the unified TaskManager."""
 
 from __future__ import annotations
 
 import json
 
-from langchain_core.tools import StructuredTool, tool
+from langchain_core.tools import StructuredTool
 
 from managers.task import TaskManager
 
@@ -53,15 +53,10 @@ todo_write = StructuredTool.from_function(
         "Batch create or update tasks. Pass a JSON array string of items, "
         "each with: id (optional), content (required), status (required: "
         "pending|in_progress|completed), blocked_by (optional: list of task ids). "
-        "Max 20 tasks, at most 1 in_progress."
+        "Max 20 tasks, at most 1 in_progress. Returns 'OK. N/M completed' only; "
+        "current task board is shown in system prompt."
     ),
 )
 
 
-@tool
-def todo_list() -> str:
-    """List all current tasks with their status and dependencies."""
-    return _get_mgr().list_all()
-
-
-TASK_TOOLS = [todo_write, todo_list]
+TASK_TOOLS = [todo_write]

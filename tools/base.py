@@ -43,12 +43,39 @@ def bash(command: str) -> str:
 
 
 @tool
-def read_file(path: str, limit: int | None = None) -> str:
-    """Read a file's contents. Optionally limit to first *limit* lines."""
+def read_file(
+    path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    limit: int | None = None,
+) -> str:
+    """Read a file's contents.
+
+    Args:
+        path: File path relative to workspace root.
+        start_line: Start line (1-indexed, inclusive). Use with end_line for range.
+        end_line: End line (1-indexed, inclusive). Use with start_line for range.
+        limit: When no range given, limit to first N lines.
+
+    Examples:
+        read_file("src/main.py")                    # full file
+        read_file("src/main.py", limit=50)         # first 50 lines
+        read_file("src/main.py", start_line=10, end_line=30)  # lines 10-30
+    """
     try:
         lines = safe_path(path).read_text(encoding="utf-8").splitlines()
-        if limit and limit < len(lines):
-            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
+        total = len(lines)
+
+        if start_line is not None and end_line is not None:
+            # Range: 1-indexed inclusive
+            start = max(1, start_line) - 1
+            end = min(total, end_line)
+            if start >= end:
+                return f"Error: Invalid range (start_line={start_line} > end_line={end_line})"
+            lines = lines[start:end]
+        elif limit and limit < total:
+            lines = lines[:limit] + [f"... ({total - limit} more lines)"]
+
         return "\n".join(lines)[:50000]
     except Exception as e:
         return f"Error: {e}"

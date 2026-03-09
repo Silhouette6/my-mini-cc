@@ -47,6 +47,14 @@ class TaskManager:
                 continue
         return tasks
 
+    def clear(self) -> None:
+        """Remove all task files. Call on startup or reset to start fresh."""
+        for f in self._dir.glob("*.json"):
+            try:
+                f.unlink()
+            except OSError:
+                continue
+
     def _unblock_downstream(self, completed_id: str) -> None:
         """Remove *completed_id* from every task's blocked_by list."""
         for f in self._dir.glob("*.json"):
@@ -92,7 +100,7 @@ class TaskManager:
             prev = existing.get(tid, {})
 
             content = str(item.get("content", "")).strip() or prev.get("content", "")
-            status = str(item.get("status", prev.get("status", "pending"))).lower()
+            status = str(item.get("status", prev.get("status", "pending"))).strip().lower()
             blocked_by = item.get("blocked_by", prev.get("blocked_by", []))
 
             if not content:
@@ -117,7 +125,12 @@ class TaskManager:
         if len(existing) > MAX_ITEMS:
             raise ValueError(f"Max {MAX_ITEMS} tasks allowed")
         if in_progress_count > 1:
-            raise ValueError("Only one task can be in_progress at a time")
+            # Auto-resolve: keep only the last in_progress (by batch order)
+            in_progress_ids = [
+                tid for tid, t in existing.items() if t.get("status") == "in_progress"
+            ]
+            for tid in in_progress_ids[:-1]:
+                existing[tid]["status"] = "pending"
 
         completed_ids = {
             t["id"] for t in existing.values() if t["status"] == "completed"
@@ -128,7 +141,15 @@ class TaskManager:
             ]
             self._save(task)
 
-        return self.list_all()
+        return self.format_summary(list(existing.values()))
+
+    @staticmethod
+    def format_summary(tasks: list[dict]) -> str:
+        """Return compact summary: 'OK. N/M completed'."""
+        if not tasks:
+            return "OK. 0/0 completed"
+        done = sum(1 for t in tasks if t.get("status") == "completed")
+        return f"OK. {done}/{len(tasks)} completed"
 
     def list_all(self) -> str:
         """Human-readable rendering of all tasks."""

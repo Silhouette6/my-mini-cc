@@ -16,10 +16,12 @@ def create_llm() -> BaseChatModel:
     settings = config.settings
     provider = settings.llm_provider.lower()
 
+    timeout = settings.llm_request_timeout
+
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        kwargs: dict = {"model": settings.model_id}
+        kwargs: dict = {"model": settings.model_id, "timeout": timeout}
         if settings.api_base_url:
             kwargs["base_url"] = settings.api_base_url
         return ChatAnthropic(**kwargs)
@@ -27,7 +29,7 @@ def create_llm() -> BaseChatModel:
     if provider == "zhipu":
         from langchain_community.chat_models import ChatZhipuAI
 
-        kwargs: dict = {"model": settings.model_id}
+        kwargs: dict = {"model": settings.model_id, "timeout": timeout}
         if settings.api_base_url:
             base = settings.api_base_url.rstrip("/")
             # ChatZhipuAI 需要完整 URL（含 /chat/completions）
@@ -39,7 +41,7 @@ def create_llm() -> BaseChatModel:
     # Default: openai-compatible (covers OpenAI, local APIs, proxies)
     from langchain_openai import ChatOpenAI
 
-    kwargs = {"model": settings.model_id}
+    kwargs: dict = {"model": settings.model_id, "request_timeout": timeout}
     if settings.api_base_url:
         kwargs["base_url"] = settings.api_base_url
     return ChatOpenAI(**kwargs)
