@@ -32,6 +32,12 @@ def _clear_startup_caches(workdir: Path) -> None:
         get_manager_cache().clear_project(path_key)
     except ImportError:
         pass  # code_index_mcp not installed
+    # Mark the index as needing a fresh rebuild on the next get_symbol_body call.
+    try:
+        from tools.code_index import invalidate_session_index
+        invalidate_session_index()
+    except Exception:
+        pass
 
 
 def _strip_thinking(text: str) -> str:
@@ -80,12 +86,51 @@ def _format_tool_args(tool_name: str, args: dict | None) -> str:
     return tool_name
 
 
+def _format_tool_response(name: str, response: dict | None) -> str:
+    """Format a function response for status display.
+
+    Prefix with "Result:" so main.py renders it with gray color.
+    Truncates to progress_status_tool_result_max chars.
+    """
+    m = config.settings.progress_status_tool_result_max
+    if not response:
+        return f"Result: {name}"
+
+    # Extract the most meaningful text from the response dict
+    content = ""
+    if isinstance(response, dict):
+        for key in ("output", "result", "error", "content", "text", "message"):
+            if key in response:
+                content = str(response[key])
+                break
+        if not content:
+            content = str(response)
+    else:
+        content = str(response)
+
+    # Collapse whitespace so multi-line tool output fits in a single status line
+    content = " ".join(content.split())
+
+    prefix = f"Result: {name}: "
+    available = m - len(prefix)
+    if available <= 0:
+        return prefix[:m]
+    return f"{prefix}{content[:available]}{'...' if len(content) > available else ''}"
+
+
 def _get_text_from_content(content: types.Content | None) -> str:
-    """Extract text from content.parts."""
+    """Extract text from content.parts, excluding thought parts.
+
+    ADK/Gemini thinking models surface thinking as Part objects with
+    thought=True rather than <think> tags.  We skip those here so thinking
+    content never appears in the displayed output.
+    """
     if not content or not content.parts:
         return ""
     out = []
     for p in content.parts:
+        if getattr(p, "thought", False):
+            continue  # ADK/Gemini thinking part — skip
         if hasattr(p, "text") and p.text:
             out.append(p.text)
     return "".join(out)
@@ -147,9 +192,14 @@ class MiniCC:
         set_task_manager(self._task_mgr)
         set_skill_loader(self._skill_loader)
 
+        # Mutable holder so we can swap the per-turn on_status callback into the
+        # before_model_callback without recreating the coordinator each turn.
+        self._context_status_holder: list[Callable | None] = [None]
+
         self._coordinator = create_coordinator(
             task_mgr=self._task_mgr,
             skill_loader=self._skill_loader,
+            on_context_status=self._context_status_holder,
         )
 
         compaction_config = EventsCompactionConfig(
@@ -192,43 +242,54 @@ class MiniCC:
         message: str,
         on_status: Callable[[str], None] | None = None,
     ) -> AgentResult:
-        new_message = types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=message)],
-        )
-        output = ""
-        tools_used: list[str] = []
+        # Bind the per-turn callback so the before_model_callback can call it
+        self._context_status_holder[0] = on_status
+        try:
+            new_message = types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=message)],
+            )
+            output = ""
+            tools_used: list[str] = []
 
-        async for event in self._runner.run_async(
-            user_id=self._user_id,
-            session_id=self._session_id,
-            new_message=new_message,
-        ):
-            if on_status:
+            async for event in self._runner.run_async(
+                user_id=self._user_id,
+                session_id=self._session_id,
+                new_message=new_message,
+            ):
+                if on_status:
+                    if event.get_function_calls():
+                        parts = []
+                        for fc in event.get_function_calls():
+                            name = getattr(fc, "name", "?")
+                            args = getattr(fc, "args", None) or {}
+                            detail = _format_tool_args(name, args)
+                            parts.append(detail)
+                        on_status(f"Calling: {' | '.join(parts)}")
+                    elif event.get_function_responses():
+                        parts = []
+                        for fr in event.get_function_responses():
+                            name = getattr(fr, "name", "?")
+                            response = getattr(fr, "response", None)
+                            parts.append(_format_tool_response(name, response))
+                        on_status(" | ".join(parts))
+                    elif not event.partial and event.content and event.content.parts:
+                        on_status("Thinking...")
+
                 if event.get_function_calls():
-                    parts = []
                     for fc in event.get_function_calls():
-                        name = getattr(fc, "name", "?")
-                        args = getattr(fc, "args", None) or {}
-                        detail = _format_tool_args(name, args)
-                        parts.append(detail)
-                    on_status(f"Calling: {' | '.join(parts)}")
-                elif event.get_function_responses():
-                    on_status("Tool: result")
-                elif not event.partial and event.content and event.content.parts:
-                    on_status("Thinking...")
+                        tools_used.append(getattr(fc, "name", "?"))
 
-            if event.get_function_calls():
-                for fc in event.get_function_calls():
-                    tools_used.append(getattr(fc, "name", "?"))
+                if event.is_final_response() and event.content:
+                    output = _get_text_from_content(event.content)
 
-            if event.is_final_response() and event.content:
-                output = _get_text_from_content(event.content)
-
-        return AgentResult(
-            output=_strip_thinking(output),
-            tools_used=tools_used,
-        )
+            return AgentResult(
+                output=_strip_thinking(output),
+                tools_used=tools_used,
+            )
+        finally:
+            # Always clear the holder after the turn ends
+            self._context_status_holder[0] = None
 
     def stream(self, message: str) -> Iterator[str]:
         """Streaming interaction — yields text chunks."""

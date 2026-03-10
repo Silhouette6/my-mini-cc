@@ -6,6 +6,7 @@ from google.adk.agents import LlmAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.lite_llm import LiteLlm
+from google.adk.tools.agent_tool import AgentTool
 from google.genai import types
 
 import config
@@ -35,20 +36,21 @@ You MUST use the task board (todo_write) for multi-step work:
 {task_status}
 
 ## Sub-agent dispatch rules
-You can delegate tasks to sub-agents (explore, coder, shell) for isolated execution.
+You can delegate tasks to sub-agents via tool calls: explore(request="..."), coder(request="..."), shell(request="...").
+Each sub-agent runs in an isolated session with no access to the current conversation history.
 If the user explicitly asks to use a sub-agent, always honor that request.
 
 When to delegate:
-- Large-scale code search or exploration → explore
-- Isolated coding task (don't pollute current context) → coder
-- Run multiple commands and analyze output → shell
+- Large-scale code search or exploration → explore(request="...")
+- Isolated coding task (don't pollute current context) → coder(request="...")
+- Run multiple commands and analyze combined output → shell(request="...")
 
 When to do it yourself (do NOT delegate):
 - Read a single known file → read_file directly
 - Make a simple edit → edit_file directly
 - Run one command → bash directly
 
-When writing a sub-agent prompt, include all necessary context — the sub-agent cannot see your conversation history.
+When writing the request argument, include all necessary context (file paths, requirements, background) — the sub-agent cannot see your conversation history.
 
 ## Code index tool (prefer over read_file for symbols)
 get_symbol_body(file_path, symbol_name): Get ONLY the code of a function/method/class. \
@@ -75,10 +77,14 @@ def _estimate_tokens_from_contents(contents: list[types.Content]) -> int:
     """Estimate token count from ADK llm_request.contents (actual LLM context).
 
     Uses len//4 heuristic; includes text, function_call, function_response.
+    Thought parts (thought=True) are skipped — they are billed separately by
+    Gemini and do not count against the regular context window.
     """
     total = 0
     for content in contents or []:
         for part in content.parts or []:
+            if getattr(part, "thought", False):
+                continue  # thinking tokens are outside the regular context window
             if part.text:
                 total += len(part.text) // 4
             if part.function_call:
@@ -108,15 +114,22 @@ def _build_context_status(
     return (
         f"[Context: {current_tokens:,}/{soft_token_limit:,} tokens | "
         f"Pressure: HIGH] "
-        "WARNING: Use subagent for all exploration and search tasks. Avoid verbose output."
+        "WARNING: Use subagent for all exploration and search tasks. "
+        "Keep tool calls minimal and avoid reading large files directly. "
+        "But Final responses to the user should still be complete and detailed."
     )
 
 
 def create_inject_dynamic_prompt(
     task_mgr: TaskManager,
     skill_loader: SkillLoader,
+    on_context_status: list | None = None,
 ):
-    """Factory: returns before_model_callback that injects dynamic system prompt."""
+    """Factory: returns before_model_callback that injects dynamic system prompt.
+
+    on_context_status: a mutable list[callable | None] used as a holder so the
+    caller can swap the callback per chat turn without recreating the agent.
+    """
 
     async def inject_dynamic_prompt(
         callback_context: CallbackContext,
@@ -135,6 +148,11 @@ def create_inject_dynamic_prompt(
         context_status = _build_context_status(
             total_tokens, config.settings.soft_token_limit
         )
+        # Notify the terminal about the current context pressure
+        if on_context_status is not None:
+            cb = on_context_status[0]
+            if cb is not None:
+                cb(context_status)
         prompt = SYSTEM_TEMPLATE.format(
             workdir=str(config.settings.workdir),
             skills_summary=_build_skills_summary(skill_loader),
@@ -147,20 +165,29 @@ def create_inject_dynamic_prompt(
     return inject_dynamic_prompt
 
 
-def _create_sub_agents(model: LiteLlm) -> list[LlmAgent]:
+def _create_sub_agent_tools(model: LiteLlm) -> list[AgentTool]:
     workdir = str(config.settings.workdir)
     explore = LlmAgent(
         name="explore",
+        description=(
+            "Code exploration and search agent. Use for large-scale codebase "
+            "search, file discovery, or understanding project structure."
+        ),
         model=model,
-        tools=READ_ONLY_TOOLS,
+        tools=READ_ONLY_TOOLS + CODE_INDEX_TOOLS,
         instruction=(
             "You are a code explorer. Read-only — never write files. "
             "Search quickly and summarize your findings concisely.\n"
+            "Use get_symbol_body to fetch specific function/class implementations efficiently.\n"
             f"Workspace: {workdir}"
         ),
     )
     coder = LlmAgent(
         name="coder",
+        description=(
+            "Coding agent for isolated implementation tasks. Use when making "
+            "changes that should not pollute the current context."
+        ),
         model=model,
         tools=BASE_TOOLS,
         instruction=(
@@ -171,6 +198,10 @@ def _create_sub_agents(model: LiteLlm) -> list[LlmAgent]:
     )
     shell = LlmAgent(
         name="shell",
+        description=(
+            "Shell command execution specialist. Use for running multiple "
+            "commands and analyzing their combined output."
+        ),
         model=model,
         tools=[BASE_TOOLS[0]],  # bash only
         instruction=(
@@ -179,15 +210,20 @@ def _create_sub_agents(model: LiteLlm) -> list[LlmAgent]:
             f"Workspace: {workdir}"
         ),
     )
-    return [explore, coder, shell]
+    return [AgentTool(explore), AgentTool(coder), AgentTool(shell)]
 
 
 def create_coordinator(
     model: LiteLlm | None = None,
     task_mgr: TaskManager | None = None,
     skill_loader: SkillLoader | None = None,
+    on_context_status: list | None = None,
 ) -> LlmAgent:
-    """Create the main coordinator agent with sub-agents and dynamic prompt."""
+    """Create the main coordinator agent with sub-agents and dynamic prompt.
+
+    on_context_status: mutable list[callable | None] holder forwarded to the
+    before_model_callback so callers can swap the callback per chat turn.
+    """
     from managers.skill import SkillLoader
     from managers.task import TaskManager
 
@@ -195,14 +231,13 @@ def create_coordinator(
     tm = task_mgr or TaskManager()
     sl = skill_loader or SkillLoader()
 
-    coordinator_tools = BASE_TOOLS + TASK_TOOLS + SKILL_TOOLS + CODE_INDEX_TOOLS
-    sub_agents = _create_sub_agents(mdl)
+    sub_agent_tools = _create_sub_agent_tools(mdl)
+    coordinator_tools = BASE_TOOLS + TASK_TOOLS + SKILL_TOOLS + CODE_INDEX_TOOLS + sub_agent_tools
 
     return LlmAgent(
         name="mini_cc",
         model=mdl,
         tools=coordinator_tools,
-        sub_agents=sub_agents,
         instruction="",  # Dynamic via before_model_callback
-        before_model_callback=create_inject_dynamic_prompt(tm, sl),
+        before_model_callback=create_inject_dynamic_prompt(tm, sl, on_context_status),
     )

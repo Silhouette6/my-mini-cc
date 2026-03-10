@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     transcript_dir: str = ".transcripts"  # 对话存档目录（相对 workdir）
 
     # --- 记忆压缩阈值 ---
-    soft_token_limit: int = 40000       # 渐进式摘要触发阈值（token 数）
-    hard_token_limit: int = 80000       # 全量压缩触发阈值（token 数）
+    soft_token_limit: int = 64000       # 渐进式摘要触发阈值（token 数）
+    hard_token_limit: int = 128000       # 全量压缩触发阈值（token 数）
     memory_tool_retain: int = 4         # 保留的普通工具消息条数
     memory_subagent_retain: int = 8     # 保留的 subagent 返回条数
     memory_load_skill_retain: int = 10   # 保留的 load_skill 返回条数

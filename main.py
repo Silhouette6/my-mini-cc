@@ -3,6 +3,7 @@
 
 import sys
 import warnings
+from pathlib import Path
 
 import config
 from core import MiniCC
@@ -12,7 +13,7 @@ warnings.filterwarnings("ignore", message=".*HMAC key.*", module="jwt.*")
 
 def main() -> None:
     agent = MiniCC()
-    print("mini-cc ready.  Commands: /compact  /reset  /tasks  /skills  /quit")
+    print("mini-cc ready.  Commands: /compact  /reset  /tasks  /skills  /cd <path>  /quit")
     print()
 
     while True:
@@ -46,6 +47,16 @@ def main() -> None:
 
         if stripped == "/skills":
             print(agent.skills.summaries())
+            continue
+
+        if stripped.startswith("/cd "):
+            new_path = Path(stripped[4:].strip()).resolve()
+            if new_path.is_dir():
+                config.settings.workdir = new_path
+                agent.reset()
+                print(f"[workspace → {new_path}]")
+            else:
+                print(f"[错误] 目录不存在: {new_path}")
             continue
 
         def on_status(s: str) -> None:
