@@ -36,6 +36,7 @@ dist/
 
 # Logs
 *.log
+log/
 
 # OS
 .DS_Store
